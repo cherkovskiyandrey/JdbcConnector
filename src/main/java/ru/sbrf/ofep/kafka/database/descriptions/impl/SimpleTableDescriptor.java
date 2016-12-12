@@ -1,22 +1,23 @@
 package ru.sbrf.ofep.kafka.database.descriptions.impl;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import ru.sbrf.ofep.kafka.database.descriptions.TableDescriptor;
 import ru.sbrf.ofep.kafka.database.dialects.SupportedVendor;
 
 import javax.sql.DataSource;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static java.lang.String.format;
+import static ru.sbrf.ofep.kafka.Utils.toDBFormat;
 
 
 public class SimpleTableDescriptor implements TableDescriptor {
-    private static final Logger LOG = LoggerFactory.getLogger(SimpleTableDescriptor.class);
-
     private final SupportedVendor vendor;
     private final boolean tableExists;
     private final Map<String, FieldDescriptor> fields;
@@ -47,24 +48,23 @@ public class SimpleTableDescriptor implements TableDescriptor {
 
             final String schema = getSchema(connection, product);
             final String tableNameForQuery = tableName.toUpperCase();
+            final List<String> autoIncrementFields = vendor.getDBDetails().getIdentityFields(connection, schema, tableName);
 
             final boolean doesTableExists = doesTableExist(dbMetaData, catalog, schema, tableNameForQuery);
-            if(!doesTableExists) {
+            if (!doesTableExists) {
                 return new SimpleTableDescriptor(vendor, doesTableExists, Collections.<String, FieldDescriptor>emptyMap());
             }
 
-            return new SimpleTableDescriptor(vendor, doesTableExists, scanFields(dbMetaData, catalog, schema, tableName));
+            return new SimpleTableDescriptor(vendor, doesTableExists, scanFields(dbMetaData, autoIncrementFields, catalog, schema, tableName));
         }
     }
 
-    private static String toDBFormat(String field) {
-        return field.toUpperCase();
-    }
-
-    private static Map<String, FieldDescriptor> scanFields(DatabaseMetaData dbMetaData, String catalog, String schema, String table)
+    private static Map<String, FieldDescriptor> scanFields(DatabaseMetaData dbMetaData,
+                                                           List<String> autoIncrementFields,
+                                                           String catalog, String schema, String table)
             throws SQLException {
         final Map<String, FieldDescriptor> result = new HashMap<>();
-        setCommonFieldInfo(dbMetaData, catalog, schema, table, result);
+        setCommonFieldInfo(dbMetaData, autoIncrementFields, catalog, schema, table, result);
         setPrimaryKeysInfo(dbMetaData, catalog, schema, table, result);
         return result;
     }
@@ -75,14 +75,15 @@ public class SimpleTableDescriptor implements TableDescriptor {
             while (primaryKeysResultSet.next()) {
                 final String fn = toDBFormat(primaryKeysResultSet.getString("COLUMN_NAME"));
                 final FieldDescriptor fd = result.get(fn);
-                if(fd != null) {
+                if (fd != null) {
                     result.put(fn, FieldDescriptor.newInstance(fd.getType(), true, fd.isAutoIncrement()));
                 }
             }
         }
     }
 
-    private static void setCommonFieldInfo(DatabaseMetaData dbMetaData, String catalog, String schema,
+    private static void setCommonFieldInfo(DatabaseMetaData dbMetaData, List<String> identityFields,
+                                           String catalog, String schema,
                                            String table, Map<String, FieldDescriptor> result) throws SQLException {
         try (final ResultSet columnsResultSet = dbMetaData.getColumns(catalog, schema, toDBFormat(table), null)) {
             while (columnsResultSet.next()) {
@@ -90,7 +91,8 @@ public class SimpleTableDescriptor implements TableDescriptor {
                         FieldDescriptor.newInstance(
                                 columnsResultSet.getInt("DATA_TYPE"),
                                 false,
-                                columnsResultSet.getString("IS_AUTOINCREMENT").equalsIgnoreCase("yes")
+                                columnsResultSet.getString("IS_AUTOINCREMENT").equalsIgnoreCase("yes") ||
+                                        identityFields.contains(columnsResultSet.getString("COLUMN_NAME"))
                         ));
             }
         }
@@ -141,6 +143,10 @@ public class SimpleTableDescriptor implements TableDescriptor {
             this.isAutoIncrement = isAutoIncrement;
         }
 
+        static FieldDescriptor newInstance(int type, boolean primaryKey, boolean isAutoIncrement) {
+            return new FieldDescriptor(primaryKey, type, isAutoIncrement);
+        }
+
         boolean isPrimaryKey() {
             return primaryKey;
         }
@@ -151,10 +157,6 @@ public class SimpleTableDescriptor implements TableDescriptor {
 
         boolean isAutoIncrement() {
             return isAutoIncrement;
-        }
-
-        static FieldDescriptor newInstance(int type, boolean primaryKey, boolean isAutoIncrement) {
-            return new FieldDescriptor(primaryKey, type, isAutoIncrement);
         }
     }
 }

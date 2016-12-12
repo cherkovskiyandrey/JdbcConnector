@@ -1,5 +1,6 @@
 package ru.sbrf.ofep.kafka;
 
+import com.google.gson.Gson;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.After;
 import org.junit.Before;
@@ -10,6 +11,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 public class AbstractTest {
+
+    protected static final Gson GSON = new Gson();
     protected DataSource dataSource;
 
     @Before
@@ -28,6 +31,7 @@ public class AbstractTest {
                     "uuid VARCHAR2(100 CHAR), " +
                     "data VARCHAR2(100 CHAR), " +
                     "clob_data CLOB NULL, " +
+                    "create_date TIMESTAMP NULL" +
                     ")");
         }
     }

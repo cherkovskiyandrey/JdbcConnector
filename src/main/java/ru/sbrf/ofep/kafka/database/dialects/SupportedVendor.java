@@ -6,18 +6,12 @@ import ru.sbrf.ofep.kafka.database.dialects.oracle.SeparatedBatchQueryBuilder;
 import ru.sbrf.ofep.kafka.database.simpleloader.SeparatedBatchReadStream;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
 public enum SupportedVendor {
     ORACLE("oracle", new SeparatedBatchQueryBuilder(), new OracleDBDetails()),
 
-    H2("h2", new SeparatedBatchQueryBuilder(), new VendorSpecificDBDetails() {
-        @Override
-        public String getSchema(Connection connection) throws SQLException {
-            return null;
-        }
-    })
+    H2("h2", new SeparatedBatchQueryBuilder(), new DefaultDBDetails())
     ;
 
     private final String vendor;

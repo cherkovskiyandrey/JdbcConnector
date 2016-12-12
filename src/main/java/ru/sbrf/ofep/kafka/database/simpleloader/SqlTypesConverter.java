@@ -4,13 +4,12 @@ import org.apache.commons.io.IOUtils;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.sql.Clob;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Types;
+import java.sql.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 
-enum AnyTypeExtractor {
+enum SqlTypesConverter {
     //Strings
     CHAR(Types.CHAR) {
         @Override
@@ -102,26 +101,82 @@ enum AnyTypeExtractor {
         String extractAsString(ResultSet result, String dataColumnName) throws SQLException {
             return result.getString(dataColumnName);
         }
-    },;
+    },
 
+    // Timestamps
+    DATE(Types.DATE) {
+        @Override
+        byte[] extractAsByteArray(ResultSet result, String dataColumnName) throws SQLException {
+            Date d = result.getDate(dataColumnName);
+            if (d == null) {
+                return EMPTY_ARRAY;
+            }
+            return dateFormat.get().format(d).getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        String extractAsString(ResultSet result, String dataColumnName) throws SQLException {
+            Date d = result.getDate(dataColumnName);
+            if (d == null) {
+                return null;
+            }
+            return dateFormat.get().format(d);
+        }
+    },
+    TIMESTAMP(Types.TIMESTAMP) {
+        @Override
+        byte[] extractAsByteArray(ResultSet result, String dataColumnName) throws SQLException {
+            Timestamp d = result.getTimestamp(dataColumnName);
+            if (d == null) {
+                return EMPTY_ARRAY;
+            }
+            return dateFormat.get().format(d).getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        String extractAsString(ResultSet result, String dataColumnName) throws SQLException {
+            Timestamp d = result.getTimestamp(dataColumnName);
+            if (d == null) {
+                return null;
+            }
+            return dateFormat.get().format(d);
+        }
+    },
+    TIMESTAMPTZ(2014, 1111, -101) {
+        @Override
+        byte[] extractAsByteArray(ResultSet result, String dataColumnName) throws SQLException {
+            return TIMESTAMP.extractAsByteArray(result, dataColumnName);
+        }
+
+        @Override
+        String extractAsString(ResultSet result, String dataColumnName) throws SQLException {
+            return TIMESTAMP.extractAsString(result, dataColumnName);
+        }
+    },
+    ;
+
+    private final static ThreadLocal<SimpleDateFormat> dateFormat = new ThreadLocal<SimpleDateFormat>(){
+        @Override
+        protected SimpleDateFormat initialValue() {
+            return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ");
+        }
+    };
     private final static byte[] EMPTY_ARRAY = new byte[0];
-    private final int jdbcType;
+    private final int[] jdbcType;
 
-    AnyTypeExtractor(int jdbcType) {
+    SqlTypesConverter(int... jdbcType) {
         this.jdbcType = jdbcType;
     }
 
-    static AnyTypeExtractor of(int jdbcType) {
-        for (AnyTypeExtractor t : values()) {
-            if (t.getJdbcType() == jdbcType) {
-                return t;
+    static SqlTypesConverter of(int jdbcType) {
+        for (SqlTypesConverter conv : values()) {
+            for(int type : conv.jdbcType) {
+                if (type == jdbcType) {
+                    return conv;
+                }
             }
         }
         return null;
-    }
-
-    int getJdbcType() {
-        return jdbcType;
     }
 
     abstract byte[] extractAsByteArray(ResultSet result, String dataColumnName) throws SQLException;

@@ -4,18 +4,16 @@ import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTaskContext;
 import org.apache.kafka.connect.storage.OffsetStorageReader;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.sql.Timestamp;
+import java.util.*;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 import static org.mockito.Matchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -25,19 +23,20 @@ import static ru.sbrf.ofep.kafka.config.ConfigParam.*;
 public class JdbcTaskTest extends AbstractTest {
 
     private void insertData(int from, int count) throws SQLException {
-        insertDataHelper(from, count, 1, "hello world", "hello clob world");
+        insertDataHelper(from, count, 1, "hello world", "hello clob world", System.currentTimeMillis());
     }
 
-    private void insertDataHelper(int from, int count, long uuid, String data, String clobData) throws SQLException {
+    private void insertDataHelper(int from, int count, long uuid, String data, String clobData, Long timestamp) throws SQLException {
         try (Connection conn = dataSource.getConnection()) {
             try (PreparedStatement st = conn.prepareStatement(
-                    "insert into test (id, uuid, data, clob_data) " +
-                            "values (?, ?, ?, ?)")) {
+                    "insert into test (id, uuid, data, clob_data, create_date) " +
+                            "values (?, ?, ?, ?, ?)")) {
                 for (int k = from; k < from + count; ++k) {
                     st.setInt(1, k);
                     st.setLong(2, uuid);
                     st.setString(3, data);
                     st.setString(4, clobData);
+                    st.setTimestamp(5, timestamp != null ? new Timestamp(timestamp) : null);
                     st.addBatch();
                 }
                 st.executeBatch();
@@ -207,7 +206,7 @@ public class JdbcTaskTest extends AbstractTest {
     @Test
     public void nullStringFieldDataTest() throws Exception {
         try (final SourceBundle sourceBundle = new SourceBundle(0, "data")) {
-            insertDataHelper(1, 1, 1, null, null);
+            insertDataHelper(1, 1, 1, null, null, null);
 
             List<SourceRecord> result = sourceBundle.getJdbcTask().poll();
 
@@ -220,7 +219,7 @@ public class JdbcTaskTest extends AbstractTest {
     @Test
     public void nullClobFieldDataTest() throws Exception {
         try (final SourceBundle sourceBundle = new SourceBundle(0, "clob_data")) {
-            insertDataHelper(1, 1, 1,null, null);
+            insertDataHelper(1, 1, 1,null, null, null);
 
             List<SourceRecord> result = sourceBundle.getJdbcTask().poll();
 
@@ -233,12 +232,12 @@ public class JdbcTaskTest extends AbstractTest {
     @Test
     public void uniqueDataIdNotExistsTest() throws Exception {
         try (final SourceBundle sourceBundle = new SourceBundle(0, "data")) {
-            insertDataHelper(1, 1, 999,null, null);
+            insertDataHelper(1, 1, 999,null, null, null);
 
             List<SourceRecord> result = sourceBundle.getJdbcTask().poll();
 
             assertEquals(1, result.size());
-            assertEquals("1", result.get(0).key());
+            assertEquals(GSON.toJson(KafkaKey.of("1", null)), result.get(0).key());
             assertEquals(0, ((byte[]) result.get(0).value()).length);
             assertEquals(1l, result.get(0).sourceOffset().get(OFFSET_ID_NAME));
         }
@@ -249,12 +248,12 @@ public class JdbcTaskTest extends AbstractTest {
         Map<String, String> settings = createSettings("data");
         settings.put(DATA_BASE_TABLE_DATA_UNIQUE_ID.getName(), "uuid");
         try (final SourceBundle sourceBundle = new SourceBundle(settings, 0)) {
-            insertDataHelper(1, 1, 999,null, null);
+            insertDataHelper(1, 1, 999,null, null, null);
 
             List<SourceRecord> result = sourceBundle.getJdbcTask().poll();
 
             assertEquals(1, result.size());
-            assertEquals("999", result.get(0).key());
+            assertEquals(GSON.toJson(KafkaKey.of("999", null)), result.get(0).key());
             assertEquals(0, ((byte[]) result.get(0).value()).length);
             assertEquals(1l, result.get(0).sourceOffset().get(OFFSET_ID_NAME));
         }
@@ -265,10 +264,56 @@ public class JdbcTaskTest extends AbstractTest {
         Map<String, String> settings = createSettings("data");
         settings.put(DATA_BASE_TABLE_DATA_UNIQUE_ID.getName(), "unknown_uuid");
         try (final SourceBundle sourceBundle = new SourceBundle(settings, 0)) {
-            insertDataHelper(1, 1, 999,null, null);
+            insertDataHelper(1, 1, 999,null, null, null);
             sourceBundle.getJdbcTask().poll();
         }
     }
+
+    @Test
+    public void timestampExistsTest() throws Exception {
+        Map<String, String> settings = createSettings("data");
+        settings.put(DATA_BASE_TABLE_DATA_TIMESTAMP.getName(), "create_date");
+        try (final SourceBundle sourceBundle = new SourceBundle(settings, 0)) {
+            Calendar calendar = GregorianCalendar.getInstance(); //(TimeZone.getTimeZone(""));
+            calendar.set(2016, Calendar.JANUARY, 1, 0, 0, 0);
+            insertDataHelper(1, 1, 999,null, null, calendar.getTimeInMillis());
+
+            List<SourceRecord> result = sourceBundle.getJdbcTask().poll();
+
+            assertEquals(1, result.size());
+            assertEquals(GSON.toJson(KafkaKey.of("1", "2016-01-01T00:00:00+0300")), result.get(0).key());
+            assertEquals(0, ((byte[]) result.get(0).value()).length);
+            assertEquals(1l, result.get(0).sourceOffset().get(OFFSET_ID_NAME));
+        }
+    }
+
+    //----- Oracle test --------
+    @Ignore
+    @Test
+    public void oracleTest() throws Exception {
+        Map<String, String> settings = new HashMap<>();
+
+        settings.put(TOPIC_CONFIG.getName(), "AUDIT_JSON_RECORDS");
+        settings.put(DATA_BASE_URL.getName(), "jdbc:oracle:thin:@10.21.25.212:1521:OVP");
+        settings.put(DATA_BASE_LOGIN.getName(), "OVP2A");
+        settings.put(DATA_BASE_PSWD.getName(), "qwe123");
+        settings.put(DATA_BASE_TABLE.getName(), "AUDIT_JSON_RECORDS");
+        settings.put(DATA_BASE_TABLE_ID.getName(), "ID");
+        settings.put(DATA_BASE_TABLE_CLOB.getName(), "DATA");
+        settings.put(DATA_BASE_TABLE_DATA_UNIQUE_ID.getName(), "UUID");
+        settings.put(DATA_BASE_TABLE_DATA_TIMESTAMP.getName(), "CREATE_DATE");
+        settings.put(DATA_BASE_TABLE_BATCH_SIZE.getName(), "1000");
+        settings.put(DATA_BASE_POLL_INTERVAL.getName(), "1");
+
+        try (final SourceBundle sourceBundle = new SourceBundle(settings, 0)) {
+            List<SourceRecord> result = sourceBundle.getJdbcTask().poll();
+
+            assertFalse(result.isEmpty());
+            assertNotNull(result.get(0).key());
+            assertEquals(1l, result.get(0).sourceOffset().get(OFFSET_ID_NAME));
+        }
+    }
+    //---------
 
     private class SourceBundle implements AutoCloseable {
         private final Map<String, String> settings;

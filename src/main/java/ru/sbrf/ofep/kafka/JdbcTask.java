@@ -5,6 +5,7 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.sbrf.ofep.kafka.config.DbConfig;
 import ru.sbrf.ofep.kafka.database.Cursor;
 import ru.sbrf.ofep.kafka.database.DataBaseClient;
 import ru.sbrf.ofep.kafka.database.DataBaseReadStream;
@@ -26,7 +27,7 @@ public class JdbcTask extends SourceTask {
 
     private final CountDownLatch stopSignal = new CountDownLatch(1);
     private volatile boolean stopFlag = false;
-    private AbstractConfig configuration;
+    private DbConfig configuration;
     private DataBaseClient dataBaseClient;
     private DataBaseReadStream dataBaseReadStream;
     private Cursor currentCursor;
@@ -40,7 +41,7 @@ public class JdbcTask extends SourceTask {
     public void start(Map<String, String> props, DataBaseClient dataBaseClient, Cursor currentCursor) {
         LOG.info("Starting task with properties: " + props);
 
-        this.configuration = new AbstractConfig(CONFIG_DEF, props);
+        this.configuration = DbConfig.of(new AbstractConfig(CONFIG_DEF, props));
         this.dataBaseClient = dataBaseClient;
         this.currentCursor = currentCursor;
     }
@@ -49,7 +50,7 @@ public class JdbcTask extends SourceTask {
     public void start(Map<String, String> props) {
         LOG.info("Starting task with properties: " + props);
 
-        this.configuration = new AbstractConfig(CONFIG_DEF, props);
+        this.configuration = DbConfig.of(new AbstractConfig(CONFIG_DEF, props));
         this.dataBaseClient = SeparatedBatchClient.newInstance(configuration);
         this.currentCursor = dataBaseClient.newCursorFromOffsetStorage(context.offsetStorageReader()).next();
     }
@@ -77,7 +78,7 @@ public class JdbcTask extends SourceTask {
     }
 
     private void handleError(SQLException e) {
-        LOG.warn("Potential recoverable error has been accoutered: ", e);
+        LOG.warn("Potential recoverable error has been appear: ", e);
         updateCurrentCursorIfNeed();
         destroyReader();
     }
@@ -103,7 +104,7 @@ public class JdbcTask extends SourceTask {
     }
 
     private void sleep() throws InterruptedException {
-        stopSignal.await(configuration.getInt(DATA_BASE_POLL_INTERVAL.getName()), TimeUnit.SECONDS);
+        stopSignal.await(configuration.getPollInterval(), TimeUnit.SECONDS);
     }
 
     @Override

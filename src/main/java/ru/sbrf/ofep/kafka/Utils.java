@@ -19,4 +19,8 @@ public class Utils {
     public static <T> Set<T> asImmutableSet(T... args) {
         return Collections.unmodifiableSet(new HashSet<>(Arrays.asList(args)));
     }
+
+    public static String toDBFormat(String field) {
+        return field.toUpperCase();
+    }
 }

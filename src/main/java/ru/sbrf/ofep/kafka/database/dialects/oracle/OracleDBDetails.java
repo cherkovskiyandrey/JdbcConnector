@@ -2,10 +2,11 @@ package ru.sbrf.ofep.kafka.database.dialects.oracle;
 
 import ru.sbrf.ofep.kafka.database.descriptions.impl.VendorSpecificDBDetails;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
+import java.util.LinkedList;
+import java.util.List;
+
+import static ru.sbrf.ofep.kafka.Utils.toDBFormat;
 
 public class OracleDBDetails implements VendorSpecificDBDetails {
     @Override
@@ -21,5 +22,23 @@ public class OracleDBDetails implements VendorSpecificDBDetails {
                 throw new SQLException("Failed to determine Oracle schema");
             }
         }
+    }
+
+    @Override
+    public List<String> getIdentityFields(Connection connection, String schema, String tableName) throws SQLException {
+        final List<String> result = new LinkedList<>();
+        try(final PreparedStatement preparedStatement = connection.
+                prepareStatement("select COLUMN_NAME from all_tab_identity_cols where OWNER = ? and TABLE_NAME = ?")) {
+
+            preparedStatement.setString(1, schema);
+            preparedStatement.setString(2, toDBFormat(tableName));
+
+            try (final ResultSet resultSet = preparedStatement.executeQuery()) {
+                while (resultSet.next()) {
+                    result.add(resultSet.getString("COLUMN_NAME"));
+                }
+            }
+        }
+        return result;
     }
 }
